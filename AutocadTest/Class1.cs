@@ -5,6 +5,7 @@ using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.Runtime;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Runtime.Remoting.Messaging;
 
 namespace YourNamespace
 {
@@ -76,9 +77,16 @@ namespace YourNamespace
                     table.SetTextString(1, 3, "Масса ед., кг");
 
                     int rowIndex = 2;
+                    // Счетчик для нумерации мультивыносок
+                    int number = 1;
+                    int leaderNumber = 1;
+                    Dictionary<ObjectId, int> leaderNumbers = new Dictionary<ObjectId, int>();
+                    List<Point3d> firstPoints = new List<Point3d>(); // Список для хранения первых точек выносок
+                    List<int> leaderCount = new List<int>(); // Список для хранения номеров выносок для каждого объекта
 
                     // Словарь для отслеживания числа экземпляров каждого GUID блока
                     Dictionary<string, int> blockCount = new Dictionary<string, int>();
+
 
                     Point3d basePoint = ppr.Value;
 
@@ -130,6 +138,45 @@ namespace YourNamespace
                                     table.SetTextString(rowIndex, 3, weight.ToString());
 
                                     rowIndex++;
+
+                                    // Текущие координаты блока
+                                    Point3d blockPosition = blkRef.Position;
+
+                                    // Конечные координаты для второй точки привязки
+                                    double xOffset = 500.0; 
+                                    double yOffset = 500.0;
+                                    double zOffset = 500.0; 
+                                    Point3d endPoint = new Point3d(blockPosition.X + xOffset, blockPosition.Y + yOffset, blockPosition.Z + zOffset);
+
+                                    // Создаем мультивыноску
+                                    MLeader leader = new MLeader();
+
+                                    leader.ContentType = ContentType.MTextContent;
+
+                                    // Создаем текстовый объект с номером
+                                    MText text = new MText();
+                                    text.Contents = number.ToString();
+                                    text.Location = endPoint; 
+
+                                    // Устанавливаем текст для мультивыноски
+                                    leader.MText = text;
+
+                                    // Параметры выноски
+                                    leader.TextStyleId = db.Textstyle;
+                                    leader.TextHeight = 45;
+                                    leader.ArrowSize = 20; 
+
+                                    // Точка привязки 
+                                    int leaderIndex = leader.AddLeaderLine(endPoint);
+                                    leader.SetFirstVertex(leaderIndex, blockPosition);
+                                    leader.LeaderLineType = LeaderType.StraightLeader;
+                                    
+                                    // Добавляем мультивыноску в пространство модели
+                                    BlockTableRecord btr1 = tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite) as BlockTableRecord;
+                                    btr1.AppendEntity(leader);
+                                    tr.AddNewlyCreatedDBObject(leader, true);
+
+                                    number++;
                                 }
                             }
 
@@ -139,7 +186,7 @@ namespace YourNamespace
                     BlockTableRecord btr = tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite) as BlockTableRecord;
                     btr.AppendEntity(table);
                     tr.AddNewlyCreatedDBObject(table, true);
-
+       
                     tr.Commit();
                 }
             }
