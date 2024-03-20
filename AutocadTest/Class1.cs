@@ -150,11 +150,12 @@ namespace YourNamespace
 
                                     // Создаем мультивыноску
                                     MLeader leader = new MLeader();
-
+                                    leader.SetDatabaseDefaults();
                                     leader.ContentType = ContentType.MTextContent;
 
                                     // Создаем текстовый объект с номером
                                     MText text = new MText();
+                                    text.SetDatabaseDefaults();
                                     text.Contents = number.ToString();
                                     text.Location = endPoint; 
 
