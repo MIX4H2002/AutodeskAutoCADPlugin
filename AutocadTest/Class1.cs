@@ -5,7 +5,6 @@ using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.Runtime;
 using System.Collections.Generic;
 using System.Data.SQLite;
-using System.Runtime.Remoting.Messaging;
 
 namespace YourNamespace
 {
@@ -84,8 +83,9 @@ namespace YourNamespace
                     List<Point3d> firstPoints = new List<Point3d>(); // Список для хранения первых точек выносок
                     List<int> leaderCount = new List<int>(); // Список для хранения номеров выносок для каждого объекта
 
-                    // Словарь для отслеживания числа экземпляров каждого GUID блока
+
                     Dictionary<string, int> blockCount = new Dictionary<string, int>();
+                    Dictionary<string, int> blockRowIndices = new Dictionary<string, int>();
 
 
                     Point3d basePoint = ppr.Value;
@@ -131,63 +131,75 @@ namespace YourNamespace
                                     string fullName = GetFullNameFromDatabase(guid, connection);
                                     double weight = GetWeightFromDatabase(guid, connection);
 
-                                    // Заполнение таблицы
-                                    table.SetTextString(rowIndex, 0, (rowIndex - 1).ToString());
-                                    table.SetTextString(rowIndex, 1, fullName);
-                                    table.SetTextString(rowIndex, 2, blockCount[guid].ToString());
-                                    table.SetTextString(rowIndex, 3, weight.ToString());
+                                    // Проверяем, содержится ли GUID в blockRowIndices
+                                    if (blockRowIndices.ContainsKey(guid))
+                                    {
+                                        // Обновляем количество в существующей строке
+                                        int existingRowIndex = blockRowIndices[guid];
+                                        int newCount = blockCount[guid];
+                                        table.SetTextString(existingRowIndex, 2, newCount.ToString());
 
-                                    rowIndex++;
+                                        int rowIndex1 = blockRowIndices[guid];
+                                        string mleaderText = table.GetTextString(rowIndex1, 0, 0); // Используем номер из таблицы
 
-                                    // Текущие координаты блока
-                                    Point3d blockPosition = blkRef.Position;
+                                        Point3d blockPosition = blkRef.Position;
+                                        CreateMLeader(db, tr, blockPosition, mleaderText);
+                                    }
+                                    else
+                                    {
+                                        // Заполнение таблицы
+                                        table.SetTextString(rowIndex, 0, (rowIndex - 1).ToString());
+                                        table.SetTextString(rowIndex, 1, fullName);
+                                        table.SetTextString(rowIndex, 2, blockCount[guid].ToString());
+                                        table.SetTextString(rowIndex, 3, weight.ToString());
 
-                                    // Конечные координаты для второй точки привязки
-                                    double xOffset = 500.0; 
-                                    double yOffset = 500.0;
-                                    double zOffset = 500.0; 
-                                    Point3d endPoint = new Point3d(blockPosition.X + xOffset, blockPosition.Y + yOffset, blockPosition.Z + zOffset);
+                                        blockRowIndices[guid] = rowIndex;
 
-                                    // Создаем мультивыноску
-                                    MLeader leader = new MLeader();
-                                    leader.SetDatabaseDefaults();
-                                    leader.ContentType = ContentType.MTextContent;
+                                        rowIndex++;
 
-                                    // Создаем текстовый объект с номером
-                                    MText text = new MText();
-                                    text.SetDatabaseDefaults();
-                                    text.Contents = number.ToString();
-                                    text.Location = endPoint; 
+                                        // Текущие координаты блока
+                                        Point3d blockPosition = blkRef.Position;
+                                        CreateMLeader(db, tr, blockPosition, number.ToString());
 
-                                    // Устанавливаем текст для мультивыноски
-                                    leader.MText = text;
-
-                                    // Параметры выноски
-                                    leader.TextStyleId = db.Textstyle;
-                                    leader.TextHeight = 45;
-                                    leader.ArrowSize = 20; 
-
-                                    // Точка привязки 
-                                    int leaderIndex = leader.AddLeaderLine(endPoint);
-                                    leader.SetFirstVertex(leaderIndex, blockPosition);
-                                    leader.LeaderLineType = LeaderType.StraightLeader;
-                                    
-                                    // Добавляем мультивыноску в пространство модели
-                                    BlockTableRecord btr1 = tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite) as BlockTableRecord;
-                                    btr1.AppendEntity(leader);
-                                    tr.AddNewlyCreatedDBObject(leader, true);
-
-                                    number++;
+                                        number++;
+                                    }
                                 }
                             }
 
                         }
                     }
+
+                    rowIndex = 2;
+                    while (rowIndex < table.NumRows)
+                    {
+                        bool isEmpty = true;
+
+                        // Проверяем каждую ячейку в строке на наличие текста
+                        for (int colIndex = 0; colIndex < table.NumColumns; colIndex++)
+                        {
+                            string cellText = table.GetTextString(rowIndex, 0, colIndex);
+                            if (!string.IsNullOrEmpty(cellText))
+                            {
+                                isEmpty = false;
+                                break;
+                            }
+                        }
+
+                        if (isEmpty)
+                        {
+                            table.DeleteRows(rowIndex, 1);
+                        }
+                        else
+                        {
+                            rowIndex++;
+                        }
+                    }
+
                     // Добавление таблицы в пространство модели
                     BlockTableRecord btr = tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite) as BlockTableRecord;
                     btr.AppendEntity(table);
                     tr.AddNewlyCreatedDBObject(table, true);
-       
+
                     tr.Commit();
                 }
             }
@@ -261,6 +273,37 @@ namespace YourNamespace
             }
 
             return weight;
+        }
+
+        public void CreateMLeader(Database db, Transaction tr, Point3d blockPosition, string mleaderText)
+        {
+            double xOffset = 500.0;
+            double yOffset = 500.0;
+            double zOffset = 500.0;
+            Point3d endPoint = new Point3d(blockPosition.X + xOffset, blockPosition.Y + yOffset, blockPosition.Z + zOffset);
+
+            MLeader leader = new MLeader();
+            leader.SetDatabaseDefaults();
+            leader.ContentType = ContentType.MTextContent;
+
+            MText text = new MText();
+            text.SetDatabaseDefaults();
+            text.Contents = mleaderText;
+            text.Location = endPoint;
+
+            leader.MText = text;
+
+            leader.TextStyleId = db.Textstyle;
+            leader.TextHeight = 45;
+            leader.ArrowSize = 40;
+
+            int leaderIndex = leader.AddLeaderLine(endPoint);
+            leader.SetFirstVertex(leaderIndex, blockPosition);
+            leader.LeaderLineType = LeaderType.StraightLeader;
+
+            BlockTableRecord btr1 = tr.GetObject(db.CurrentSpaceId, OpenMode.ForWrite) as BlockTableRecord;
+            btr1.AppendEntity(leader);
+            tr.AddNewlyCreatedDBObject(leader, true);
         }
     }
 }
